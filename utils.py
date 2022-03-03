@@ -64,7 +64,7 @@ def save_best_models(net, output_path, best_records, epoch, metric, num_saves=1,
                 np.save(output_path + 'patch_acc_loss_step_' + str(epoch) + '.npy', patch_acc_loss)
                 np.save(output_path + 'patch_occur_step_' + str(epoch) + '.npy', patch_occur)
                 np.save(output_path + 'patch_chosen_values_step_' + str(epoch) + '.npy', patch_chosen_values)
-    print('best_records', best_records)
+
     np.save(os.path.join(output_path, 'best_records.npy'), best_records)
 
 

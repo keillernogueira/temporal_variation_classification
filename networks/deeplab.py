@@ -1,138 +1,136 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torchvision import models
 from networks.utils import initialize_weights
 
 
-class _EncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(_EncoderBlock, self).__init__()
+class _ResNet18(nn.Module):
+    def __init__(self, input_channels, pretrained):
+        super(_ResNet18, self).__init__()
 
-        self.encode = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2)
-        )
+        # loading backbone
+        backbone = models.resnet18(pretrained=pretrained, progress=False)
+
+        if input_channels == 3:
+            self.init = nn.Sequential(
+                backbone.conv1,
+                backbone.bn1,
+                backbone.relu,
+                backbone.maxpool
+            )
+        else:
+            self.init = nn.Sequential(
+                nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
+                backbone.bn1,
+                backbone.relu,
+                backbone.maxpool
+            )
+
+        self.layer1 = backbone.layer1  # output feat = 64
+        self.layer2 = backbone.layer2  # output feat = 128
+        self.layer3 = backbone.layer3  # output feat = 256
+        self.layer4 = backbone.layer4  # output feat = 512
 
     def forward(self, x):
-        return self.encode(x)
+        fv_init = self.init(x)
+        fv1 = self.layer1(fv_init)
+        fv2 = self.layer2(fv1)
+        fv3 = self.layer3(fv2)
+        fv4 = self.layer4(fv3)
+
+        return fv2, fv4
 
 
 class _ASPPBlock(nn.Module):
     def __init__(self, in_channels, out_channels, atrous_rates):
         super(_ASPPBlock, self).__init__()
 
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=atrous_rates[0], dilation=atrous_rates[0]),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=atrous_rates[1], dilation=atrous_rates[1]),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=atrous_rates[2], dilation=atrous_rates[2]),
+        self.init_conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.conv5 = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0),
+        # atrous convs
+        self.atrous_conv1 = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1,
+                      padding=atrous_rates[0], dilation=atrous_rates[0], bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        self.atrous_conv2 = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1,
+                      padding=atrous_rates[1], dilation=atrous_rates[1], bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        self.atrous_conv3 = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1,
+                      padding=atrous_rates[2], dilation=atrous_rates[2], bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
-        self.conv6 = nn.Sequential(
-            nn.Conv2d(out_channels * 5, out_channels, kernel_size=1, stride=1, padding=0),
+        self.pool_conv = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+        self.final_conv = nn.Sequential(
+            nn.Conv2d(out_channels * 5, out_channels, kernel_size=1, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
     def forward(self, x):
         _, _, h, w = x.shape
-        c1 = self.conv1(x)
-        c2 = self.conv2(x)
-        c3 = self.conv3(x)
-        c4 = self.conv4(x)
+        fv_init = self.init_conv(x)
+        fv_c1 = self.atrous_conv1(x)
+        fv_c2 = self.atrous_conv2(x)
+        fv_c3 = self.atrous_conv3(x)
 
-        p1 = self.pool(x)
-        c5 = self.conv5(p1)
-        b1 = F.interpolate(c5, size=(h, w), mode="bilinear", align_corners=False)
+        fv_pc = self.pool_conv(x)
+        fv_pc_r = F.interpolate(fv_pc, size=(h, w), mode="bilinear", align_corners=False)
 
-        cat = torch.cat([c1, c2, c3, c4, b1], dim=1)
-        return self.conv6(cat)
+        cat = torch.cat([fv_init, fv_c1, fv_c2, fv_c3, fv_pc_r], dim=1)
+        return self.final_conv(cat)
 
 
-class _DecoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel, padding):
-        super(_DecoderBlock, self).__init__()
+class DeepLabV3Plus(nn.Module):
+    def __init__(self, input_channels, num_classes, pretrained=False):
+        super(DeepLabV3Plus, self).__init__()
 
-        self.decode = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel, stride=1, padding=padding),
-            nn.BatchNorm2d(out_channels),
+        self.backbone = _ResNet18(input_channels, pretrained)
+
+        self.low_level_feat_proj = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True)
         )
 
+        self.aspp = _ASPPBlock(512, 256, atrous_rates=[2, 4, 6])
+
+        self.classifier = nn.Sequential(
+            nn.Conv2d(512, 256, 3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, num_classes, 1)
+        )
+
+        if not pretrained:
+            initialize_weights(self)
+
     def forward(self, x):
-        return self.decode(x)
+        low_level, out = self.backbone(x)
 
+        low_level_fv = self.low_level_feat_proj(low_level)
 
-class DeepLab(nn.Module):
-    def __init__(self, input_channels, num_classes):
-        super(DeepLab, self).__init__()
+        aspp_feat = self.aspp(out)
+        aspp_feat = F.interpolate(aspp_feat, size=low_level_fv.shape[2:], mode="bilinear", align_corners=False)
 
-        self.enc1 = _EncoderBlock(input_channels, 64)
-        self.enc2 = _EncoderBlock(64, 128)
-        self.enc3 = _EncoderBlock(128, 256)
+        final = self.classifier(torch.cat([low_level_fv, aspp_feat], dim=1))
 
-        self.aspp = _ASPPBlock(256, 256, atrous_rates=[2, 4, 8])
-
-        self.low_level_features = _DecoderBlock(64, 256, kernel=1, padding=0)
-
-        self.dec3 = _DecoderBlock(256*2, 256, kernel=3, padding=1)
-        self.dec2 = _DecoderBlock(256, 256, kernel=3, padding=1)
-
-        self.dec1 = nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0)
-
-        initialize_weights(self)
-
-    def forward(self, x, feat=False):
-        _, _, h, w = x.shape
-
-        enc1 = self.enc1(x)
-        enc2 = self.enc2(enc1)
-        enc3 = self.enc3(enc2)
-
-        aspp = self.aspp(enc3)
-
-        low_level_features = self.low_level_features(enc1)
-
-        _, _, h_lf, w_lf = low_level_features.shape
-        b1 = F.interpolate(aspp, size=(h_lf, w_lf), mode="bilinear", align_corners=False)
-        cat = torch.cat([b1, low_level_features], dim=1)
-
-        dec3 = self.dec3(cat)
-        dec2 = self.dec2(dec3)
-
-        dec1 = self.dec1(dec2)
-
-        final = F.interpolate(dec1, size=(h, w), mode="bilinear", align_corners=False)
-
-        if feat:
-            return (final,
-                    F.upsample(dec1, x.size()[2:], mode='bilinear'),
-                    F.upsample(dec2, x.size()[2:], mode='bilinear'))
-        else:
-            return final
+        return F.interpolate(final, size=x.shape[2:], mode="bilinear", align_corners=False)
