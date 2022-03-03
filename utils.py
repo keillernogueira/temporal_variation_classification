@@ -52,7 +52,7 @@ def save_best_models(net, output_path, best_records, epoch, metric, num_saves=1,
 
             os.remove(os.path.join(output_path, 'model_' + min_step + '.pth'))
             # replace min value with current
-            best_records.append({'epoch': epoch, 'kappa': metric})
+            best_records[min_index] = {'epoch': epoch, 'kappa': metric}
             # save current model
             torch.save(net.state_dict(), os.path.join(output_path, 'model_' + str(epoch) + '.pth'))
 
@@ -64,6 +64,8 @@ def save_best_models(net, output_path, best_records, epoch, metric, num_saves=1,
                 np.save(output_path + 'patch_acc_loss_step_' + str(epoch) + '.npy', patch_acc_loss)
                 np.save(output_path + 'patch_occur_step_' + str(epoch) + '.npy', patch_occur)
                 np.save(output_path + 'patch_chosen_values_step_' + str(epoch) + '.npy', patch_chosen_values)
+    print('best_records', best_records)
+    np.save(os.path.join(output_path, 'best_records.npy'), best_records)
 
 
 def define_multinomial_probs(values, dif_prob=2):

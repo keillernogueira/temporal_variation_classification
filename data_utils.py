@@ -16,7 +16,6 @@ def load_image(image_path):  # os.path.join(dataset_path, image_name)
 
 def create_distributions_over_classes(labels, crop_size, stride_size, num_classes, return_all=False):
     classes = [[[] for i in range(0)] for i in range(num_classes + 1)]
-    bincount = np.zeros(10)
 
     w, h = labels.shape
 
@@ -42,8 +41,11 @@ def create_distributions_over_classes(labels, crop_size, stride_size, num_classe
                                                                 "x" + str(len(patch_class[0]))
 
             count = np.bincount(patch_class.astype(int).flatten(), minlength=10)
-            bincount += count
-            classes[np.argmax(count[:-1])].append((cur_x, cur_y, count))
+            # print('count', count, count[-1] == crop_size * crop_size, np.argmax(count[:-1]))
+            if count[-1] == crop_size * crop_size:
+                classes[-1].append((cur_x, cur_y, count))
+            else:
+                classes[np.argmax(count[:-1])].append((cur_x, cur_y, count))
 
     for i in range(len(classes)):
         print('Class ' + str(i + 1) + ' has length ' + str(len(classes[i])))
@@ -70,9 +72,6 @@ def compute_image_mean(data):
 
 
 def dynamically_calculate_mean_and_std(data, distrib, crop_size):
-    mean_full = []
-    std_full = []
-
     all_patches = []
 
     for i in range(len(distrib)):
@@ -86,18 +85,8 @@ def dynamically_calculate_mean_and_std(data, distrib, crop_size):
 
         all_patches.append(patch)
 
-        if i > 0 and i % 5000 == 0:
-            mean, std = compute_image_mean(np.asarray(all_patches))
-            mean_full.append(mean)
-            std_full.append(std)
-            all_patches = []
-
     # remaining images
-    mean, std = compute_image_mean(np.asarray(all_patches))
-    mean_full.append(mean)
-    std_full.append(std)
-
-    return np.mean(mean_full, axis=0), np.mean(std_full, axis=0)
+    return compute_image_mean(np.asarray(all_patches))
 
 
 def create_or_load_statistics(data, distrib, crop_size, stride_size, output_path):

@@ -40,6 +40,8 @@ class DataLoader(data.Dataset):
         self.labels[np.where(self.labels == 0)] = 10  # so it can be ignored in the loss
         self.labels = self.labels - 1  # from 0 to 9, being 9 the class to be ignored
 
+        print('num_channels / labels', self.num_channels, self.num_classes)
+
         if self.model_name == 'pixelwise':
             # for each and every pixel, we should create a new patch
             self.distrib = np.column_stack(np.where(self.labels != 9))
@@ -59,6 +61,7 @@ class DataLoader(data.Dataset):
         cur_x, cur_y = self.distrib[index][0], self.distrib[index][1]
 
         img = self.data[cur_x:cur_x + self.crop_size, cur_y:cur_y + self.crop_size, :]
+
         if self.model_name == 'pixelwise':
             label = self.labels[cur_x, cur_y]
         else:
@@ -80,7 +83,7 @@ class DataLoader(data.Dataset):
         label = torch.from_numpy(label.copy())
 
         # Returning to iterator.
-        return img.double(), label, cur_x, cur_y
+        return img.float(), label, cur_x, cur_y
 
     def __len__(self):
         return len(self.distrib)

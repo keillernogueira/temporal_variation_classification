@@ -1,6 +1,7 @@
 import sys
 import datetime
 import pathlib
+import math
 
 from PIL import Image
 from skimage import img_as_float
@@ -36,7 +37,6 @@ def test(test_loader, model, epoch):
 
             # Casting to cuda variables.
             inps = Variable(inps).cuda()
-            labs = Variable(labs).cuda()
 
             # Forwarding.
             outs = model(inps)
@@ -47,11 +47,11 @@ def test(test_loader, model, epoch):
             labels = labels.flatten()
 
             # filtering out pixels
-            coord = np.where(labels != 9)
+            coord = np.where(labels != test_loader.dataset.num_classes)
             labels = labels[coord]
             prds = prds[coord]
 
-            track_cm += confusion_matrix(labels, prds, minlength=9)
+            track_cm += confusion_matrix(labels, prds, labels=[0, 1, 2, 3, 4, 5, 6, 7, 8])
 
         acc = (track_cm[0][0] + track_cm[1][1]) / np.sum(track_cm)
         f1_s = f1_with_cm(track_cm)
@@ -103,6 +103,18 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # Computing loss.
         loss = criterion(outs, labs)
 
+        if math.isnan(loss):
+            print('-------------------------NaN-----------------------------------------------')
+            print(inps.shape, labels.shape, outs.shape, np.bincount(labels.flatten()))
+            print(np.min(inps.cpu().data.numpy()), np.max(inps.cpu().data.numpy()),
+                  np.isnan(inps.cpu().data.numpy()).any())
+            print(np.min(labels.cpu().data.numpy()), np.max(labels.cpu().data.numpy()),
+                  np.isnan(labels.cpu().data.numpy()).any())
+            print(np.min(outs.cpu().data.numpy()), np.max(outs.cpu().data.numpy()),
+                  np.isnan(outs.cpu().data.numpy()).any())
+            print('-------------------------NaN-----------------------------------------------')
+            raise AssertionError
+
         # Computing backpropagation.
         loss.backward()
         optimizer.step()
@@ -119,12 +131,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
             labels = labels.cpu().data.numpy().flatten()
 
             # filtering out pixels
-            coord = np.where(labels != 9)
+            coord = np.where(labels != train_loader.dataset.num_classes)
             labels = labels[coord]
             prds = prds[coord]
 
             acc = accuracy_score(labels, prds)
-            conf_m = confusion_matrix(labels, prds)
+            conf_m = confusion_matrix(labels, prds, labels=[0, 1, 2, 3, 4, 5, 6, 7, 8])
             f1_s = f1_score(labels, prds, average='weighted')
 
             _sum = 0.0
@@ -165,9 +177,10 @@ def main():
     parser.add_argument('--model_path', type=str, default=None, help='Model path.')
     parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.005, help='Weight decay')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
-    parser.add_argument('--epoch_num', type=int, default=200, help='Number of epochs')
-    parser.add_argument('--loss_weight', type=float, nargs='+', default=[1.0, 1.0], help='Weight Loss.')
+    parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
+    parser.add_argument('--epoch_num', type=int, default=500, help='Number of epochs')
+    parser.add_argument('--loss_weight', type=float, nargs='+',
+                        default=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], help='Weight Loss.')
 
     # dynamic dilated convnet options
     parser.add_argument('--distribution_type', type=str, default=None,
@@ -184,7 +197,7 @@ def main():
     # reading the input image
     # read this image here because it is going to be used for both train and test
     data = img_as_float(load_image(os.path.join(args.dataset_input_path, args.image_name)))
-    print('image ', data.shape, data[0, 0, 0], type(data[0, 0, 0]))
+    print('image ', np.min(data), np.max(data), data.shape, data[0, 0, 0], type(data[0, 0, 0]))
 
     if args.operation == 'Train':
         print('---- training data ----')
@@ -202,7 +215,8 @@ def main():
         # Setting network architecture.
         model = model_factory(args.model_name, train_set.num_channels, train_set.num_classes).cuda()
 
-        criterion = nn.CrossEntropyLoss(ignore_index=args.num_classes + 1).cuda()
+        criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(args.loss_weight),
+                                        ignore_index=train_set.num_classes).cuda()
 
         # Setting optimizer.
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay,
@@ -224,7 +238,7 @@ def main():
         # Iterating over epochs.
         for epoch in range(curr_epoch, args.epoch_num + 1):
             # Training function.
-            train(train_loader, model, criterion, optimizer, epoch, args.gpu)
+            train(train_loader, model, criterion, optimizer, epoch)
             if epoch % VAL_INTERVAL == 0:
                 # Computing test.
                 acc, nacc, f1_s, kappa, track_cm = test(test_loader, model, epoch)
