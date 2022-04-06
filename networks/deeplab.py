@@ -100,7 +100,7 @@ class _ASPPBlock(nn.Module):
 
 
 class DeepLabV3Plus(nn.Module):
-    def __init__(self, input_channels, num_classes, pretrained=False):
+    def __init__(self, input_channels, num_classes, pretrained=True):
         super(DeepLabV3Plus, self).__init__()
 
         self.backbone = _ResNet18(input_channels, pretrained)

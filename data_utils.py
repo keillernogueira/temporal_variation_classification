@@ -16,6 +16,7 @@ def load_image(image_path):  # os.path.join(dataset_path, image_name)
 
 def create_distributions_over_classes(labels, crop_size, stride_size, num_classes, return_all=False):
     classes = [[[] for i in range(0)] for i in range(num_classes + 1)]
+    gen_classes = []
 
     w, h = labels.shape
 
@@ -46,16 +47,17 @@ def create_distributions_over_classes(labels, crop_size, stride_size, num_classe
                 classes[-1].append((cur_x, cur_y, count))
             else:
                 classes[np.argmax(count[:-1])].append((cur_x, cur_y, count))
+                gen_classes.append(np.argmax(count[:-1]))
 
     for i in range(len(classes)):
         print('Class ' + str(i + 1) + ' has length ' + str(len(classes[i])))
 
     if return_all is False:
         return np.asarray(classes[0] + classes[1] + classes[2] + classes[3] + classes[4] +
-                          classes[5] + classes[6] + classes[7] + classes[8])
+                          classes[5] + classes[6] + classes[7] + classes[8]), np.asarray(gen_classes)
     else:
         return np.asarray(classes[0] + classes[1] + classes[2] + classes[3] + classes[4] +
-                          classes[5] + classes[6] + classes[7] + classes[8] + classes[9])
+                          classes[5] + classes[6] + classes[7] + classes[8] + classes[9]), np.asarray(gen_classes)
 
 
 def normalize_images(data, _mean, _std):
@@ -71,7 +73,7 @@ def compute_image_mean(data):
     return _mean, _std
 
 
-def dynamically_calculate_mean_and_std(data, distrib, crop_size):
+def calculate_mean_and_std(data, distrib, crop_size):
     all_patches = []
 
     for i in range(len(distrib)):
@@ -98,7 +100,7 @@ def create_or_load_statistics(data, distrib, crop_size, stride_size, output_path
         _std = np.load(os.path.join(output_path, 'crop_' + str(crop_size) + '_stride_' +
                                     str(stride_size) + '_std.npy'), allow_pickle=True)
     else:
-        _mean, _std = dynamically_calculate_mean_and_std(data, distrib, crop_size)
+        _mean, _std = calculate_mean_and_std(data, distrib, crop_size)
         np.save(os.path.join(output_path, 'crop_' + str(crop_size) + '_stride_' +
                 str(stride_size) + '_mean.npy'), _mean)
         np.save(os.path.join(output_path, 'crop_' + str(crop_size) + '_stride_' +

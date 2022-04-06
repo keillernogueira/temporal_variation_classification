@@ -40,13 +40,14 @@ class DataLoader(data.Dataset):
         self.labels[np.where(self.labels == 0)] = 10  # so it can be ignored in the loss
         self.labels = self.labels - 1  # from 0 to 9, being 9 the class to be ignored
 
-        print('num_channels / labels', self.num_channels, self.num_classes)
+        print('num_channels / labels', self.num_channels, self.num_classes, np.bincount(self.labels.flatten()))
 
         if self.model_name == 'pixelwise':
-            # for each and every pixel, we should create a new patch
+            # for each and every labelled pixel, we should create a new patch
             self.distrib = np.column_stack(np.where(self.labels != 9))
         else:
-            self.distrib = self.make_dataset()
+            self.distrib, self.gen_classes = self.make_dataset()
+
         self.mean, self.std = create_or_load_statistics(self.data, self.distrib, self.crop_size,
                                                         self.stride_crop, self.output_path)
 
@@ -68,7 +69,7 @@ class DataLoader(data.Dataset):
             label = self.labels[cur_x:cur_x + self.crop_size, cur_y:cur_y + self.crop_size]
 
         # Normalization.
-        normalize_images(img, self.mean, self.std)
+        # normalize_images(img, self.mean, self.std)
 
         if self.mode == 'Train':
             if self.model_name == 'pixelwise':

@@ -90,6 +90,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # Obtaining images, labels and paths for batch.
         inps, labels = data[0], data[1]
 
+        # if the current batch does not have samples from all classes
+        # print('out i', i, len(np.unique(labels.flatten())))
+        # if len(np.unique(labels.flatten())) < 10:
+        #     print('in i', i, len(np.unique(labels.flatten())))
+        #     continue
+
         # Casting tensors to cuda.
         inps = Variable(inps).cuda()
         labs = Variable(labels).cuda()
@@ -173,7 +179,7 @@ def main():
 
     # model options
     parser.add_argument('--model_name', type=str, required=True,
-                        choices=['segnet', 'deeplab', 'ddcn', 'pixelwise'], help='Model to evaluate')
+                        choices=['segnet', 'deeplab', 'fcnwideresnet', 'ddcn', 'pixelwise'], help='Model to evaluate')
     parser.add_argument('--model_path', type=str, default=None, help='Model path.')
     parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.005, help='Weight decay')
@@ -188,6 +194,7 @@ def main():
     parser.add_argument('--values', type=int, nargs='+', default=None, help='Values considered in the distribution.')
     parser.add_argument('--update_type', type=str, default='acc', help='Update type [Options: loss, acc]')
 
+    parser.add_argument('--weight_sampler', type=str2bool, default=False, help='Use weight sampler for loader?')
     args = parser.parse_args()
     print(args)
 
@@ -203,12 +210,21 @@ def main():
         print('---- training data ----')
         train_set = DataLoader('Train', data, args.dataset_input_path, args.crop_size, args.stride_crop,
                                args.output_path, args.model_name)
-        train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size,
-                                                   shuffle=True, num_workers=NUM_WORKERS, drop_last=False)
-
         print('---- testing data ----')
         test_set = DataLoader('Test', data, args.dataset_input_path, args.crop_size, args.stride_crop,
                               args.output_path, args.model_name)
+
+        if args.weight_sampler is False:
+            train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size,
+                                                       shuffle=True, num_workers=NUM_WORKERS, drop_last=False)
+        else:
+            class_loader_weights = 1. / np.bincount(train_set.gen_classes)
+            samples_weights = class_loader_weights[train_set.gen_classes]
+            sampler = torch.utils.data.sampler.WeightedRandomSampler(samples_weights, len(samples_weights),
+                                                                     replacement=True)
+            train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size,
+                                                       num_workers=NUM_WORKERS, drop_last=False, sampler=sampler)
+
         test_loader = torch.utils.data.DataLoader(test_set, batch_size=args.batch_size,
                                                   shuffle=False, num_workers=NUM_WORKERS, drop_last=False)
 
@@ -221,7 +237,8 @@ def main():
         # Setting optimizer.
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay,
                                betas=(0.9, 0.99))
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
+        # optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay, momentum=0.9)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1)
 
         curr_epoch = 1
         best_records = []
@@ -236,6 +253,7 @@ def main():
         model.cuda()
 
         # Iterating over epochs.
+        print('---- training ----')
         for epoch in range(curr_epoch, args.epoch_num + 1):
             # Training function.
             train(train_loader, model, criterion, optimizer, epoch)
